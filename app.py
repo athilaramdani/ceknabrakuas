@@ -282,14 +282,15 @@ with header:
 
 with selection:
     st.sidebar.header("Data Source")
-    uploaded_file = st.sidebar.file_uploader("Upload CSV Jadwal (Opsional)", type=["csv"])
+    st.sidebar.info("Silakan download file jadwal CSV dari sistem dan upload di bawah.")
+    uploaded_file = st.sidebar.file_uploader("Upload CSV Jadwal", type=["csv"])
     
     if uploaded_file is not None:
         data_source = uploaded_file
-        st.sidebar.success("Menggunakan file yang diupload.")
+        st.sidebar.success("File CSV berhasil diproses.")
     else:
-        data_source = 'UAS(JADWAL JAGA).csv'
-        st.sidebar.info("Menggunakan file default.")
+        st.info("👋 Silakan upload file CSV Jadwal terlebih dahulu pada panel di sebelah kiri untuk melihat data.")
+        st.stop()
 
 data = load_data(data_source)
 if data is None: st.stop()
