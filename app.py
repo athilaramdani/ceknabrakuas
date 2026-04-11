@@ -51,7 +51,8 @@ def load_data(file_input):
         col_names = []
         
         for i, line in enumerate(lines):
-            if "Nama Pengawas" in line or "nama pengawas" in line.lower():
+            lower_line = line.lower()
+            if "nama pengawas" in lower_line or "nama lengkap (pengawas" in lower_line:
                 header_idx = i
                 # Manually parse columns
                 raw_cols = [c.strip().replace('"', '') for c in line.split(';')]
@@ -68,7 +69,7 @@ def load_data(file_input):
                 break
         
         if header_idx == -1:
-            st.error(f"Header 'Nama Pengawas' tidak ditemukan dalam file {file_source_name}.")
+            st.error(f"Header 'Nama Pengawas' atau 'Nama Lengkap (Pengawas' tidak ditemukan dalam file {file_source_name}.")
             return None
 
         # 2. Read CSV using the found data
@@ -102,7 +103,11 @@ def load_data(file_input):
 def parse_indonesian_date(date_str):
     if not isinstance(date_str, str): return None
     try:
-        parts = date_str.strip().split()
+        clean_str = date_str
+        if ',' in clean_str:
+            clean_str = clean_str.split(',', 1)[1]
+            
+        parts = clean_str.strip().split()
         if len(parts) >= 3:
             day = int(parts[0])
             month_str = parts[1]
@@ -291,10 +296,10 @@ if data is None: st.stop()
 
 # Find Supervisor Columns
 # Case insensitive search including "Nama Pengawas"
-sup_cols = [c for c in data.columns if 'nama pengawas' in c.lower()]
+sup_cols = [c for c in data.columns if 'nama pengawas' in c.lower() or 'nama lengkap (pengawas' in c.lower()]
 
 if not sup_cols:
-    st.error("Kolom 'Nama Pengawas' tidak ditemukan. Cek format file.")
+    st.error("Kolom 'Nama Pengawas' atau 'Nama Lengkap (Pengawas' tidak ditemukan. Cek format file.")
     st.write("Kolom yang terbaca:", data.columns.tolist())
     st.stop()
 
@@ -352,16 +357,25 @@ if sel_name:
     # 2. Map to Standard Format
     rows = []
     for _, r in subset.iterrows():
-        do = parse_indonesian_date(r.get('Tanggal'))
-        s, e = parse_time_range(r.get('Pukul'))
+        tanggal_val = r.get('Tanggal')
+        do = parse_indonesian_date(tanggal_val)
+        
+        waktu_val = r.get('Pukul') if pd.notna(r.get('Pukul')) else r.get('Jam')
+        s, e = parse_time_range(waktu_val)
+        
+        activity_val = r.get('SUBJECTNAME') if pd.notna(r.get('SUBJECTNAME')) else r.get('Nama MK')
+        if pd.isna(activity_val): activity_val = 'Ujian'
+        
+        room_val = r.get('ROOM') if pd.notna(r.get('ROOM')) else r.get('Ruangan')
+        if pd.isna(room_val): room_val = '-'
         
         rows.append({
-            'Activity': r.get('SUBJECTNAME', 'Ujian'),
+            'Activity': activity_val,
             'DateObj': do,
-            'DateStr': r.get('Tanggal', '-'),
+            'DateStr': tanggal_val if pd.notna(tanggal_val) else '-',
             'Start': s,
             'End': e,
-            'Room': r.get('ROOM', '-'),
+            'Room': room_val,
             'Hari': get_day_name(do),
             'Type': 'Pengawas',
             'ValidTime': (s is not None and e is not None)
