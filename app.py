@@ -193,24 +193,27 @@ def _best_text_color(rgb):
 
 def wrap_text(text, max_length=15):
     text = str(text)
-    words = text.split()
-    lines = []
-    current = []
-    curr_len = 0
-    for w in words:
-        if curr_len + len(w) + len(current) > max_length:
-            if current:
-                lines.append(' '.join(current))
-                current = [w]
-                curr_len = len(w)
+    final_lines = []
+    for line in text.split('\n'):
+        words = line.split(' ')
+        lines = []
+        current = []
+        curr_len = 0
+        for w in words:
+            if curr_len + len(w) + len(current) > max_length:
+                if current:
+                    lines.append(' '.join(current))
+                    current = [w]
+                    curr_len = len(w)
+                else:
+                    lines.append(w[:max_length])
+                    current = [w[max_length:]]
             else:
-                lines.append(w[:max_length])
-                current = [w[max_length:]]
-        else:
-            current.append(w)
-            curr_len += len(w)
-    if current: lines.append(' '.join(current))
-    return '\n'.join(lines)
+                current.append(w)
+                curr_len += len(w)
+        if current: lines.append(' '.join(current))
+        final_lines.extend(lines)
+    return '\n'.join(final_lines)
 
 def plot_jadwal_data(df, title="Jadwal"):
     if df.empty:
@@ -250,11 +253,22 @@ def plot_jadwal_data(df, title="Jadwal"):
         cx, cy = h_idx, y_bottom + y_height/2
         tc = _best_text_color(col)
         
-        info = f"{row['Activity']}\n{start}-{end}\n{row['Room']}"
+        info = f"{row['Activity']}"
+        
+        kelas = row.get('Kelas', '-')
+        if kelas != '-':
+            info += f"\nKls: {kelas}"
+            
+        info += f"\n{start}-{end}\n{row['Room']}"
+        
+        partner = row.get('Partner', '-')
+        if partner != '-':
+            info += f"\nPtr: {partner}"
+            
         if row.get('Type') == 'External': info += " (Ext)"
         
         ax.text(cx, cy, wrap_text(info, max_length=15), 
-                ha='center', va='center', fontsize=9, 
+                ha='center', va='center', fontsize=8, 
                 color=tc, fontweight='bold', clip_on=True)
         
     ax.set_xlim(-0.5, 6.5)
@@ -272,6 +286,37 @@ def plot_jadwal_data(df, title="Jadwal"):
     ax.set_title(title, fontsize=14)
     
     return fig
+
+def format_rupiah(angka):
+    return f"Rp {angka:,.0f}".replace(",", ".")
+
+def get_summary_stats(df_data, sup_cols):
+    stats = {}
+    if 'NO' in df_data.columns:
+        df_unique = df_data.drop_duplicates(subset=['NO'])
+    else:
+        df_unique = df_data
+        
+    for _, r in df_unique.iterrows():
+        kelas_val = str(r.get('Kelas', '')).upper()
+        if pd.isna(r.get('Kelas')): kelas_val = ''
+        
+        fee = 60000 if 'INT' in kelas_val else 30000
+        
+        for c in sup_cols:
+            p_name = r.get(c)
+            if pd.notna(p_name) and isinstance(p_name, str) and len(p_name.strip()) > 2:
+                name_clean = p_name.strip()
+                if name_clean not in stats:
+                    stats[name_clean] = {'Total Mengawas': 0, 'Total Pendapatan': 0}
+                stats[name_clean]['Total Mengawas'] += 1
+                stats[name_clean]['Total Pendapatan'] += fee
+                
+    df_stats = pd.DataFrame.from_dict(stats, orient='index').reset_index()
+    if not df_stats.empty:
+        df_stats.columns = ['Nama Pengawas', 'Total Mengawas', 'Total Pendapatan']
+        df_stats = df_stats.sort_values(by='Total Mengawas', ascending=False).reset_index(drop=True)
+    return df_stats
 
 # --- APP LAYOUT ---
 header = st.container()
@@ -334,6 +379,8 @@ with selection:
                 'Start': es.strftime("%H:%M"),
                 'End': ee.strftime("%H:%M"),
                 'Room': 'External',
+                'Kelas': '-',
+                'Partner': '-',
                 'Hari': get_day_name(datetime.combine(ed, datetime.min.time())),
                 'Type': 'External',
                 'ValidTime': True
@@ -370,6 +417,17 @@ if sel_name:
         room_val = r.get('ROOM') if pd.notna(r.get('ROOM')) else r.get('Ruangan')
         if pd.isna(room_val): room_val = '-'
         
+        kelas_val = r.get('Kelas')
+        if pd.isna(kelas_val): kelas_val = '-'
+        
+        partners = []
+        for c in sup_cols:
+            p_name = r.get(c)
+            if pd.notna(p_name) and str(p_name).strip() != "" and str(p_name).strip().lower() != sel_name.lower():
+                partners.append(str(p_name).strip())
+        
+        partner_str = ", ".join(partners) if partners else "-"
+        
         rows.append({
             'Activity': activity_val,
             'DateObj': do,
@@ -377,6 +435,8 @@ if sel_name:
             'Start': s,
             'End': e,
             'Room': room_val,
+            'Kelas': kelas_val,
+            'Partner': partner_str,
             'Hari': get_day_name(do),
             'Type': 'Pengawas',
             'ValidTime': (s is not None and e is not None)
@@ -390,7 +450,7 @@ if sel_name:
         df_show = check_conflicts(df_show)
         
         # Table
-        st.dataframe(df_show[['Hari', 'DateStr', 'Start', 'End', 'Activity', 'Room', 'Conflict']])
+        st.dataframe(df_show[['Hari', 'DateStr', 'Start', 'End', 'Activity', 'Kelas', 'Room', 'Partner', 'Conflict']])
         
         if df_show['Conflict'].any():
             st.error("JADWAL BENTROK TERDETEKSI!")
@@ -402,6 +462,52 @@ if sel_name:
         st.warning("Belum ada jadwal.")
 else:
     st.info("Pilih nama di sebelah kiri.")
+
+# --- DASHBOARD RINGKASAN ---
+st.markdown("---")
+st.subheader("📊 Dashboard Ringkasan Pengawas")
+
+df_stats = get_summary_stats(data, sup_cols)
+
+if not df_stats.empty:
+    if sel_name:
+        # Filtered dashboard
+        user_stat = df_stats[df_stats['Nama Pengawas'].str.lower() == sel_name.lower()]
+        if not user_stat.empty:
+            total_ngawas = user_stat.iloc[0]['Total Mengawas']
+            total_fee = user_stat.iloc[0]['Total Pendapatan']
+        else:
+            total_ngawas = 0
+            total_fee = 0
+            
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Pengawas", sel_name)
+        c2.metric("Total Mengawas", f"{total_ngawas} kali")
+        c3.metric("Total Pendapatan", format_rupiah(total_fee))
+    else:
+        # Global dashboard
+        top_row = df_stats.iloc[0]
+        top_name = top_row['Nama Pengawas']
+        top_count = top_row['Total Mengawas']
+        
+        total_all_ngawas = df_stats['Total Mengawas'].sum()
+        total_all_fee = df_stats['Total Pendapatan'].sum()
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🏆 Top Pengawas", f"{top_name} ({top_count} kali)")
+        c2.metric("Total Semua Mengawas", f"{total_all_ngawas} kali")
+        c3.metric("Total Semua Pendapatan", format_rupiah(total_all_fee))
+        
+        st.markdown("**Detail Pendapatan per Pengawas**")
+        
+        df_display = df_stats.copy()
+        df_display['Total Pendapatan'] = df_display['Total Pendapatan'].apply(format_rupiah)
+        
+        # Tambahkan index mulai dari 1 untuk tabel detail
+        df_display.index = df_display.index + 1
+        st.dataframe(df_display, use_container_width=True)
+else:
+    st.info("Tidak ada data pengawas yang dapat dihitung.")
 
 # --- FOOTER ---
 st.markdown("---")
